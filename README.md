@@ -180,6 +180,20 @@ Cybersecurity AI (CAI) is a lightweight, open-source framework that empowers sec
     - [🔹 Tracing](#-tracing)
     - [🔹 Guardrails](#-guardrails)
     - [🔹 Human-In-The-Loop (HITL)](#-human-in-the-loop-hitl)
+  - [📖 Deep Dive: Technical Architecture \& Analysis](#-deep-dive-technical-architecture--analysis)
+    - [📁 Directory Layout \& Code Structure](#-directory-layout--code-structure)
+    - [🏗️ Core Architecture \& Design Patterns](#️-core-architecture--design-patterns)
+    - [🔑 Key Classes \& Functions Reference](#-key-classes--functions-reference)
+    - [🤖 Agent Lifecycle \& Execution Flow](#-agent-lifecycle--execution-flow)
+    - [🔄 Multi-Agent Coordination Patterns](#-multi-agent-coordination-patterns)
+    - [🧠 Memory Systems](#-memory-systems)
+    - [🛡️ Security Guardrails Implementation](#️-security-guardrails-implementation)
+    - [🤖 Multi-Model Support (300+ LLMs)](#-multi-model-support-300-llms)
+    - [📊 Telemetry \& Observability](#-telemetry--observability)
+    - [📦 Dependencies \& Technology Stack](#-dependencies--technology-stack)
+    - [🔧 Extension Points for Forking \& Customization](#-extension-points-for-forking--customization)
+    - [🆚 How CAI Differs from Other Frameworks](#-how-cai-differs-from-other-frameworks)
+    - [🚀 Recommended Learning Path](#-recommended-learning-path)
   - [:rocket: Quickstart](#rocket-quickstart)
     - [Environment Variables](#environment-variables)
     - [OpenRouter Integration](#openrouter-integration)
@@ -786,6 +800,519 @@ For detailed implementation, see [docs/guardrails.md](docs/guardrails.md) and [d
 CAI delivers a framework for building Cybersecurity AIs with a strong emphasis on *semi-autonomous* operation, as the reality is that **fully-autonomous** cybersecurity systems remain premature and face significant challenges when tackling complex tasks. While CAI explores autonomous capabilities, we recognize that effective security operations still require human teleoperation providing expertise, judgment, and oversight in the security process.
 
 Accordingly, the Human-In-The-Loop (`HITL`) module is a core design principle of CAI, acknowledging that human intervention and teleoperation are essential components of responsible security testing. Through the `cli.py` interface, users can seamlessly interact with agents at any point during execution by simply pressing `Ctrl+C`. This is implemented across [core.py](cai/core.py) and also in the REPL abstractions [REPL](cai/repl).
+
+---
+
+## 📖 Deep Dive: Technical Architecture & Analysis
+
+This section provides a comprehensive technical analysis of CAI's internals for developers who want to understand, fork, or extend the framework.
+
+### 📁 Directory Layout & Code Structure
+
+```
+src/cai/
+├── cli.py                          # Main CLI entry point (run_cai_cli)
+├── __init__.py                     # Package initialization
+├── util.py                         # Utility functions
+│
+├── sdk/agents/                     # Core Agent SDK (framework engine)
+│   ├── agent.py                    # Agent dataclass definition
+│   ├── run.py                      # Runner orchestration engine
+│   ├── guardrail.py                # Input/output guardrail system
+│   ├── handoffs.py                 # Agent handoff mechanisms
+│   ├── lifecycle.py                # RunHooks & AgentHooks callbacks
+│   ├── tool.py                     # Tool base classes & decorators
+│   ├── models/                     # LLM integration layer
+│   │   ├── interface.py            # Model & ModelProvider ABCs
+│   │   ├── openai_chatcompletions.py  # ChatCompletions implementation
+│   │   ├── openai_provider.py      # Default model provider
+│   │   └── openai_responses.py     # Responses API support
+│   ├── tracing/                    # Telemetry & observability
+│   │   ├── spans.py                # Span types (Agent, Function, Generation, etc.)
+│   │   ├── traces.py               # Trace containers
+│   │   ├── processors.py           # Batch processing & export
+│   │   └── create.py               # Trace/span factory
+│   ├── extensions/                 # Handoff filters & visualization
+│   │   └── handoff_filters.py      # Input filtering for handoffs
+│   ├── mcp/                        # Model Context Protocol support
+│   └── voice/                      # Voice I/O pipeline
+│
+├── agents/                         # Pre-built security agents
+│   ├── __init__.py                 # Agent registry & factory functions
+│   ├── guardrails.py               # Security guardrail implementations
+│   ├── memory.py                   # Memory systems (episodic/semantic)
+│   └── patterns/                   # Multi-agent coordination patterns
+│       ├── pattern.py              # Pattern base class & types
+│       ├── red_team.py             # Red team swarm pattern
+│       ├── bb_triage.py            # Bug bounty triage pattern
+│       ├── red_blue_team.py        # Red/blue team parallel pattern
+│       └── ...                     # Additional pattern implementations
+│
+├── tools/                          # Security tool implementations
+│   ├── reconnaissance/             # Recon tools (nmap, curl, shodan, etc.)
+│   │   ├── generic_linux_command.py  # Shell command execution
+│   │   ├── exec_code.py            # Python code execution
+│   │   ├── nmap.py                 # Network scanning
+│   │   ├── curl.py                 # HTTP requests
+│   │   └── ...                     # shodan, netcat, filesystem, crypto, etc.
+│   ├── web/                        # Web tools (search, webshell)
+│   ├── network/                    # Traffic capture & analysis
+│   ├── command_and_control/        # SSH automation (sshpass)
+│   └── misc/                       # Code interpreter, RAG, reasoning
+│
+├── repl/                           # Interactive CLI/REPL interface
+│   └── commands/                   # 20+ REPL commands (/agent, /model, /run, etc.)
+│
+├── prompts/                        # Prompt templates
+│   └── core/
+│       ├── system_master_template.md  # Main system prompt
+│       └── user_master_template.md    # User prompt template
+│
+└── internal/                       # Internal utilities (metrics, logging, endpoints)
+
+tests/                              # Test suite
+├── agents/                         # Agent tests
+├── core/                           # Core functionality tests
+├── cli/                            # CLI tests
+├── mcp/                            # MCP tests
+└── conftest.py                     # Pytest configuration
+
+examples/                           # Usage examples
+├── basic/                          # Hello world, tools, streaming, lifecycle
+├── agent_patterns/                 # Routing, guardrails, parallelization
+├── handoffs/                       # Handoff examples
+├── mcp/                            # MCP integration examples
+└── research_bot/                   # Research automation examples
+
+benchmarks/                         # CAIBench meta-benchmark
+dockerized/                         # Docker setup (Kali Linux based)
+docs/                               # Comprehensive documentation (70+ files)
+```
+
+### 🏗️ Core Architecture & Design Patterns
+
+CAI uses the **ReAct (Reasoning + Action) agent model** as its core execution paradigm. Each agent interaction consists of:
+1. **Reasoning** — An LLM inference step where the agent analyzes the current state
+2. **Action** — Zero-to-N tool calls executed based on the reasoning output
+
+The framework is built around **8 pillars**: `Agents`, `Tools`, `Handoffs`, `Patterns`, `Turns`, `Tracing`, `Guardrails`, and `HITL` (Human-In-The-Loop).
+
+**Key Design Patterns Used:**
+| Pattern | Where Used | Purpose |
+|---------|-----------|---------|
+| **Generic Dataclass** | `Agent[TContext]` | Type-safe agent configuration with context flexibility |
+| **Strategy Pattern** | `tool_use_behavior` | Configurable tool execution strategies (run_llm_again, stop_on_first_tool) |
+| **Factory Pattern** | `get_agent_by_name()` | Dynamic agent instantiation from registry |
+| **Observer Pattern** | `RunHooks`, `AgentHooks` | Lifecycle event callbacks |
+| **Decorator Pattern** | `@function_tool`, `@input_guardrail` | Transparent capability augmentation |
+| **Abstract Base Class** | `Model`, `ModelProvider` | Model-agnostic LLM interface |
+| **Swarm Coordination** | `Pattern(type=SWARM)` | Decentralized multi-agent collaboration |
+
+### 🔑 Key Classes & Functions Reference
+
+The 10 most important classes/functions to understand:
+
+| # | Class/Function | File | Purpose |
+|---|---------------|------|---------|
+| 1 | `Agent[TContext]` | `sdk/agents/agent.py` | Core agent dataclass — holds name, instructions, model, tools, handoffs, guardrails |
+| 2 | `Runner.run()` | `sdk/agents/run.py` | Main execution loop — orchestrates agent turns, guardrails, handoffs |
+| 3 | `OpenAIChatCompletionsModel` | `sdk/agents/models/openai_chatcompletions.py` | LLM call handler — converts tools to schemas, manages streaming, tracks tokens |
+| 4 | `InputGuardrail` / `OutputGuardrail` | `sdk/agents/guardrail.py` | Security validation — tripwire-based input/output filtering |
+| 5 | `Handoff[TContext]` | `sdk/agents/handoffs.py` | Agent delegation — transfers control with input filtering |
+| 6 | `Pattern` | `agents/patterns/pattern.py` | Multi-agent coordination — defines topology (swarm, parallel, hierarchical) |
+| 7 | `get_agent_by_name()` | `agents/__init__.py` | Agent factory — creates configured agent instances from registry |
+| 8 | `@function_tool` | `sdk/agents/tool.py` | Tool decorator — registers Python functions as agent-callable tools |
+| 9 | `RunHooks` / `AgentHooks` | `sdk/agents/lifecycle.py` | Lifecycle callbacks — on_agent_start, on_tool_end, on_handoff, etc. |
+| 10 | `run_cai_cli()` | `cli.py` | CLI entry point — environment configuration, agent initialization, execution loop |
+
+### 🤖 Agent Lifecycle & Execution Flow
+
+```
+                    ┌──────────────────────────────────┐
+                    │        Runner.run(agent, input)   │
+                    └──────────────┬───────────────────┘
+                                   │
+                    ┌──────────────▼───────────────────┐
+                    │  Initialize: trace, context,      │
+                    │  turn counter, hooks              │
+                    └──────────────┬───────────────────┘
+                                   │
+              ┌────────────────────▼────────────────────┐
+              │  FIRST TURN: Run InputGuardrails in     │
+              │  parallel with agent execution           │
+              │  (asyncio.gather)                        │
+              └────────────────────┬────────────────────┘
+                                   │
+              ┌────────────────────▼────────────────────┐
+              │        _run_single_turn(agent)           │
+              │  1. Get system prompt (static/dynamic)   │
+              │  2. Convert tools → function schemas     │
+              │  3. LLM inference (reasoning step)       │
+              │  4. Process tool calls (action step)     │
+              │  5. Determine next step                  │
+              └─────────┬──────────┬──────────┬─────────┘
+                        │          │          │
+            ┌───────────▼──┐  ┌───▼────┐  ┌──▼──────────┐
+            │ NextStepFinal│  │Handoff │  │ RunAgain    │
+            │    Output    │  │        │  │ (continue)  │
+            └───────┬──────┘  └───┬────┘  └──┬──────────┘
+                    │             │           │
+            ┌───────▼──────┐  ┌──▼────────┐  └──► Loop back
+            │   Output     │  │ Swap agent│
+            │  Guardrails  │  │ Transfer  │
+            └───────┬──────┘  │ history   │
+                    │         └───────────┘
+            ┌───────▼──────┐
+            │  RunResult   │
+            │ (final_output│
+            │  new_items,  │
+            │  raw_resp)   │
+            └──────────────┘
+```
+
+**Agent Creation → Execution → Termination:**
+1. **Creation**: `Agent(name, instructions, model, tools, handoffs, guardrails)` — immutable dataclass
+2. **Cloning**: `agent.clone(name="Modified")` — create variants with overrides
+3. **Execution**: `Runner.run(agent, input)` — multi-turn loop with guardrails
+4. **Termination**: Returns `RunResult` when agent produces final output or `max_turns` reached
+
+**Agent-as-Tool Functionality:**
+```python
+# Any agent can be used as a tool by another agent
+specialist = Agent(name="Crypto Expert", instructions="...")
+leader = Agent(
+    name="Team Lead",
+    tools=[specialist.as_tool(
+        tool_name="ask_crypto_expert",
+        tool_description="Consult the cryptography specialist"
+    )]
+)
+```
+
+### 🔄 Multi-Agent Coordination Patterns
+
+CAI supports 5 pattern categories, each defined in `src/cai/agents/patterns/`:
+
+| Pattern Type | Coordination | Use Case | Implementation |
+|-------------|-------------|----------|----------------|
+| **Swarm** | Cyclic handoffs, decentralized | Red team ops, bug bounty triage | Agents get bidirectional handoffs; message history transfers on handoff |
+| **Parallel** | Simultaneous execution | Red/blue team concurrent assessment | `Pattern(type=PARALLEL)` with unified or split context |
+| **Hierarchical** | Root agent → child agents | Delegated task breakdown | Root assigns via structured handoffs |
+| **Sequential** | Ordered pipeline | Step-by-step workflows | Linear chain with defined ordering |
+| **Conditional** | Predicate-based branching | Decision trees | Evaluated predicates determine next agent |
+
+**Swarm Pattern Example (Red Team):**
+```
+    ┌──────────────┐    handoff    ┌──────────────┐
+    │  Red Team    │◄────────────►│   Thought     │
+    │  Agent       │              │   Agent       │
+    └──────┬───────┘              └──────┬────────┘
+           │         handoff             │
+           └──────────────►──────────────┘
+                          │
+                   ┌──────▼────────┐
+                   │  DNS/SMTP     │
+                   │  Agent        │
+                   └───────────────┘
+```
+
+In swarm patterns, the message history is automatically transferred between agents during handoffs, enabling shared context without a central coordinator.
+
+### 🧠 Memory Systems
+
+CAI implements a **two-tier vector database memory system** using Qdrant:
+
+| Memory Type | Scope | Storage | Use Case |
+|------------|-------|---------|----------|
+| **Episodic** | Per-CTF/target | Named Qdrant collection (e.g., "Target_1") | Task-specific chronological records |
+| **Semantic** | Cross-exercise | Global "_all_" collection | Knowledge transfer across different tasks |
+
+**Key Functions** (`src/cai/agents/memory.py`):
+- `add_to_memory_episodic()` — Store task-specific observations
+- `add_to_memory_semantic()` — Store cross-task knowledge
+- `query_memory()` — RAG retrieval from vector DB
+- `get_previous_memory()` — Retrieve relevant historical context
+
+**Memory Integration Flow:**
+```
+Agent Execution → system_master_template.md renders:
+  ├─ Agent instructions (role/behavior)
+  ├─ Compacted summary (previous context)
+  ├─ Memory injection (Qdrant vector DB retrieval)
+  │   ├─ Episodic: CTF-specific results
+  │   └─ Semantic: Cross-exercise knowledge
+  ├─ Reasoning augmentation (optional)
+  └─ Environment context (OS, IPs, CTF info)
+```
+
+**Configuration:**
+- `CAI_MEMORY=episodic|semantic|all` — Select memory mode
+- `CAI_MEMORY_ONLINE=true` — Enable incremental updates during execution
+- `CAI_MEMORY_OFFLINE=true` — Batch learning from JSONL logs
+
+> **Note**: The current recommended approach prioritizes In-Context Learning (ICL) via the `/load` command over persistent memory stores (see FAQ).
+
+### 🛡️ Security Guardrails Implementation
+
+CAI implements **defense-in-depth** with multi-layered guardrails:
+
+**Input Guardrails** (`src/cai/agents/guardrails.py`):
+- **40+ regex patterns** detecting prompt injection attempts
+- **Unicode homograph normalization** — Detects Cyrillic/Greek character substitution attacks
+- **Base64/Base32 decoding** — Unpacks encoded payloads for analysis
+- **Pattern matching categories**: Direct instruction overrides, hidden system notes, role manipulation, encoded commands, data exfiltration attempts
+
+**Output Guardrails** (`src/cai/agents/guardrails.py`):
+- **Dangerous command blocking**: `rm -rf /`, fork bombs (`:(){ :|:& };:`), `curl|sh` pipes
+- **Reverse shell detection**: Netcat IP patterns, `bash -i` redirections
+- **Environment variable exfiltration**: `$()`, backtick command substitution
+- **Encoded command detection**: Base64/Base32 decode → execute patterns
+
+**Guardrail Execution Architecture:**
+```python
+# Input guardrails run in PARALLEL with the first agent turn
+result, guardrail_results = await asyncio.gather(
+    _run_single_turn(agent, ...),       # Agent execution
+    _run_input_guardrails(agent, ...)   # Guardrail checks
+)
+
+# Output guardrails run SERIALLY before returning final output
+for guardrail in agent.output_guardrails:
+    result = await guardrail.run(context, agent, output)
+    if result.output.tripwire_triggered:
+        raise OutputGuardrailTripwireTriggered(...)
+```
+
+**Configuration**: `CAI_GUARDRAILS=true|false` (default: `true`)
+
+### 🤖 Multi-Model Support (300+ LLMs)
+
+CAI achieves model-agnostic design through a layered abstraction:
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   CAI Agent Layer                     │
+│  Agent(model=OpenAIChatCompletionsModel(...))        │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│              Model Abstraction Layer                  │
+│  Model (ABC) ← OpenAIChatCompletionsModel            │
+│  ModelProvider (ABC) ← OpenAIProvider                 │
+│  - get_model(model_name) → Model instance            │
+│  - Shared HTTP client for connection pooling          │
+└──────────────────────┬──────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────┐
+│             LiteLLM Integration Layer                 │
+│  300+ models via unified OpenAI-compatible interface  │
+│  - OpenAI: GPT-4o, O1, O3, GPT-4.5                  │
+│  - Anthropic: Claude 3.5/3.7 Sonnet, Opus            │
+│  - DeepSeek: V3, R1                                  │
+│  - Ollama: Qwen2.5, Llama, Mistral (local)           │
+│  - OpenRouter: Any supported model                   │
+│  - Azure OpenAI: Enterprise deployments              │
+│  - alias1: Cybersecurity-specialized model            │
+└─────────────────────────────────────────────────────┘
+```
+
+**Key Implementation Details** (`src/cai/sdk/agents/models/`):
+- **Token tracking**: Input, output, and reasoning tokens counted per call
+- **Cost calculation**: Per-model pricing tracked across sessions
+- **Streaming support**: Real-time response streaming with rich panel output
+- **Retry logic**: Handled via the OpenAI client library's built-in retry mechanisms
+- **Rate limiting**: Managed through LiteLLM's provider-level rate limit handling
+
+**Model Selection:**
+```bash
+# Via environment variable
+CAI_MODEL=openai/gpt-4o cai
+
+# Via REPL command
+CAI> /model openai/gpt-4o
+
+# Via Python API
+model = OpenAIChatCompletionsModel(
+    model="anthropic/claude-sonnet-4-20250514",
+    openai_client=AsyncOpenAI()
+)
+```
+
+### 📊 Telemetry & Observability
+
+CAI implements comprehensive tracing using the **OpenTelemetry standard** with [Phoenix](https://github.com/Arize-ai/phoenix) integration:
+
+**Span Hierarchy:**
+```
+Trace (workflow root)
+├── AgentSpanData           # Agent execution lifecycle
+│   ├── GenerationSpanData  # Individual LLM calls
+│   ├── FunctionSpanData    # Tool/function executions
+│   ├── HandoffSpanData     # Agent-to-agent transitions
+│   └── GuardrailSpanData   # Guardrail evaluations
+├── ResponseSpanData        # Tool output processing
+├── TranscriptionSpanData   # Speech-to-text (voice pipeline)
+├── SpeechSpanData          # Text-to-speech (voice pipeline)
+└── MCPListToolsSpanData    # MCP server tool discovery
+```
+
+**Export Pipeline:**
+- `BatchTraceProcessor` — Accumulates spans and exports in batches
+- `ConsoleSpanExporter` — Prints to console for debugging
+- `BackendSpanExporter` — HTTP POST to tracing backend
+
+**Configuration:**
+- `CAI_TRACING=true|false` — Enable/disable tracing (default: `true`)
+- `CAI_TELEMETRY=true|false` — Enable/disable backend export (default: `true`)
+
+### 📦 Dependencies & Technology Stack
+
+| Category | Package | Purpose |
+|----------|---------|---------|
+| **AI/LLM** | `openai==1.75.0` | OpenAI API client (base for all model calls) |
+| **AI/LLM** | `litellm>=1.63.7` | Unified interface for 300+ LLM providers |
+| **Core** | `pydantic>=2.10` | Data validation and settings management |
+| **Core** | `requests>=2.0` | HTTP client for API calls |
+| **Visualization** | `matplotlib>=3.0`, `networkx` | Graph visualization & agent topology |
+| **Data** | `pandas>=1.3` | Data manipulation for benchmarks |
+| **SSH** | `paramiko>=3.5.1` | SSH tunnel and remote command execution |
+| **DNS** | `dnspython` | DNS reconnaissance tools |
+| **PDF** | `PyPDF2` | PDF parsing for document analysis |
+| **Web** | `flask` | Web server for MCP/API endpoints |
+| **Voice** | `numpy>=2.2.0`, `websockets>=15.0` | Voice pipeline (Python 3.10+) |
+
+**Framework Foundation**: CAI builds on its **own custom agent SDK** (`src/cai/sdk/agents/`), inspired by OpenAI's [`swarm`](https://github.com/openai/swarm) library. It is **not** built on LangChain or LangGraph — it uses a lighter-weight, purpose-built agent framework.
+
+**Storage**: Qdrant vector database (optional, for memory features)
+
+### 🔧 Extension Points for Forking & Customization
+
+#### Adding Custom Agents
+
+Create a new file in `src/cai/agents/` following the existing pattern:
+
+```python
+# src/cai/agents/my_custom_agent.py
+from cai.sdk.agents import Agent, OpenAIChatCompletionsModel
+from cai.tools.reconnaissance.generic_linux_command import generic_linux_command
+
+my_agent = Agent(
+    name="My Custom Agent",
+    instructions="You are a specialized security agent for ...",
+    tools=[generic_linux_command],
+    model=OpenAIChatCompletionsModel(
+        model="openai/gpt-4o",
+        openai_client=AsyncOpenAI(),
+    )
+)
+```
+
+The agent will be automatically discovered by `get_available_agents()` which scans the `cai/agents/` directory.
+
+#### Adding Custom Tools
+
+Use the `@function_tool` decorator to register any Python function:
+
+```python
+# src/cai/tools/my_tools/api_scanner.py
+from cai.sdk.agents import function_tool
+
+@function_tool
+def scan_api_endpoint(url: str, method: str = "GET") -> str:
+    """Scan an API endpoint for common vulnerabilities."""
+    # Your implementation here
+    import requests
+    response = requests.request(method, url, timeout=30)
+    return f"Status: {response.status_code}, Headers: {dict(response.headers)}"
+```
+
+Then add it to any agent's `tools` list:
+```python
+agent = Agent(tools=[scan_api_endpoint, ...])
+```
+
+#### Adding Custom Guardrails
+
+```python
+from cai.sdk.agents import input_guardrail, GuardrailFunctionOutput
+
+@input_guardrail
+async def my_custom_guardrail(context, agent, input_data):
+    """Custom security policy check."""
+    # Your validation logic
+    is_safe = check_my_policy(input_data)
+    return GuardrailFunctionOutput(
+        output_info={"policy": "custom_check"},
+        tripwire_triggered=not is_safe
+    )
+
+agent = Agent(input_guardrails=[my_custom_guardrail], ...)
+```
+
+#### Adding Custom Multi-Agent Patterns
+
+Create a new pattern in `src/cai/agents/patterns/`:
+
+```python
+from cai.agents.patterns.pattern import Pattern, PatternType
+
+my_pattern = Pattern(
+    type=PatternType.PARALLEL,
+    unified_context=True
+)
+my_pattern.add_parallel_agent(scanner_agent, config)
+my_pattern.add_parallel_agent(analyzer_agent, config)
+```
+
+#### Integration Points for External Platforms
+
+| Integration Point | How to Hook In |
+|-------------------|----------------|
+| **External security platforms** | Create custom tools with `@function_tool` that call platform APIs |
+| **Custom memory backends** | Extend `src/cai/agents/memory.py` with new storage providers |
+| **Custom telemetry** | Implement a new `TracingExporter` in `sdk/agents/tracing/` |
+| **Custom model providers** | Extend `ModelProvider` ABC in `sdk/agents/models/interface.py` |
+| **MCP tool servers** | Connect via `/mcp load` command (SSE or STDIO transport) |
+
+### 🆚 How CAI Differs from Other Frameworks
+
+| Feature | CAI | LangChain | AutoGPT |
+|---------|-----|-----------|---------|
+| **Focus** | Cybersecurity-specific | General-purpose | General autonomous |
+| **Architecture** | ReAct + Swarm patterns | Chain-based | Goal-based autonomous loop |
+| **Built-in Tools** | Security tools (nmap, netcat, SSH, etc.) | Generic connectors | Web + file tools |
+| **Guardrails** | Prompt injection + dangerous cmd detection | Optional via 3rd party | Limited |
+| **Multi-Agent** | Swarm, hierarchical, parallel, sequential, conditional | Sequential chains | Single agent |
+| **Model Support** | 300+ via LiteLLM | Multiple via adapters | OpenAI primary |
+| **HITL** | Native Ctrl+C interruption | Callback-based | Limited |
+| **Memory** | Episodic + semantic vector DB | Various memory types | File-based |
+| **Weight** | Lightweight, minimal dependencies | Heavy, many abstractions | Medium |
+| **CTF/BugBounty** | First-class support | Not built-in | Not built-in |
+
+**What Makes CAI Cybersecurity-Specific:**
+- Pre-built agents for red teaming, blue teaming, DFIR, web pentesting, Android SAST
+- Security kill chain-organized tool categories (reconnaissance → exploitation → privilege escalation → lateral movement → exfiltration → C2)
+- CTF-aware execution (automatic challenge detection, flag discrimination)
+- Security-focused guardrails (dangerous command blocking, prompt injection defense)
+- Bug bounty workflow support (triage, retesting patterns)
+- Benchmarking against cybersecurity-specific metrics (CAIBench)
+
+### 🚀 Recommended Learning Path
+
+For developers looking to understand and extend CAI:
+
+1. **Start Here**: Read `src/cai/sdk/agents/agent.py` — understand the `Agent` dataclass
+2. **Execution Flow**: Read `src/cai/sdk/agents/run.py` — understand `Runner.run()` loop
+3. **Tools**: Read `src/cai/tools/reconnaissance/generic_linux_command.py` — see how `@function_tool` works
+4. **Try Examples**: Run `examples/basic/hello_world.py` and `examples/basic/tools.py`
+5. **Pre-built Agents**: Read `src/cai/agents/__init__.py` — understand agent registry
+6. **Patterns**: Read `src/cai/agents/patterns/red_team.py` — understand swarm coordination
+7. **Guardrails**: Read `src/cai/agents/guardrails.py` — understand security protections
+8. **CLI**: Read `src/cai/cli.py` — understand the full application entry point
+9. **Extend**: Create your own agent + tool following the patterns above
+10. **Advanced**: Explore multi-agent patterns in `src/cai/agents/patterns/`
+
+---
 
 
 ## :rocket: Quickstart
